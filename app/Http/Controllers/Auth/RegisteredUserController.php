@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
@@ -34,8 +35,30 @@ class RegisteredUserController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|string|lowercase|email|max:255|unique:'.User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            'subdomain' => 'required|string|max:255|alpha_dash|unique:domains,domain',
         ]);
 
+        // Create the tenant with tenant_userName format
+        $tenant = Tenant::create([
+            'id' => 'tenant_' . $request->subdomain,
+        ]);
+
+        // Create the domain for the tenant
+        $tenant->domains()->create([
+            'domain' => $request->subdomain . '.tempahjer.test',
+        ]);
+
+        // Run tenant migrations
+        $tenant->run(function () use ($request) {
+            // Create user in tenant database
+            User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+            ]);
+        });
+
+        // Create user in central database as well for authentication
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
@@ -46,6 +69,7 @@ class RegisteredUserController extends Controller
 
         Auth::login($user);
 
-        return to_route('dashboard');
+        // Redirect to central dashboard after successful registration
+        return redirect()->route('dashboard');
     }
 }
