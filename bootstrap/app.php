@@ -20,6 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 Route::middleware('web')
                     ->domain($domain)
                     ->group(base_path('routes/web.php'));
+                
+                // Register API routes for central domains
+                Route::middleware('api')
+                    ->prefix('api')
+                    ->domain($domain)
+                    ->group(base_path('routes/api.php'));
             }
 
             Route::middleware('web')->group(base_path('routes/tenant.php'));
@@ -32,6 +38,13 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+        ]);
+        
+        // Define API middleware group
+        $middleware->alias([
+            'api' => [
+                \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            ],
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
