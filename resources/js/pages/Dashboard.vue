@@ -41,7 +41,7 @@ const fetchCurrentDomain = async () => {
             
             // For 'tempahjer.test', we want to extract 'test'
             if (domain === 'tempahjer.test') {
-                currentSubdomain.value = 'test';
+                currentSubdomain.value = '';
             } else {
                 // For other domains like 'test.tempahjer.test', extract the first part
                 const domainParts = domain.split('.');

@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Domain;
+use Stancl\Tenancy\Database\Models\Domain;
 use App\Models\Tenant;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -30,13 +30,23 @@ class SubdomainController extends Controller
 
         $subdomain = $request->input('subdomain');
 
-        // Check if the subdomain exists in the domains table
-        $exists = Domain::where('domain', 'like', $subdomain . '.%')->exists();
+        try {
+            // Check if the subdomain exists in the domains table
+            $exists = Domain::where('domain', 'like', $subdomain . '.%')->exists();
 
-        return response()->json([
-            'available' => !$exists,
-            'message' => $exists ? 'This subdomain is already taken.' : 'This subdomain is available.'
-        ]);
+            return response()->json([
+                'available' => !$exists,
+                'message' => $exists ? 'This subdomain is already taken.' : 'This subdomain is available.'
+            ]);
+        } catch (\Exception $e) {
+            // Log the error for debugging
+            \Log::error('Subdomain check error: ' . $e->getMessage());
+            
+            return response()->json([
+                'available' => false,
+                'message' => 'An error occurred while checking subdomain availability.'
+            ], 500);
+        }
     }
 
     /**
@@ -56,82 +66,91 @@ class SubdomainController extends Controller
             ], 422);
         }
 
-        $currentSubdomain = $request->input('current_subdomain');
-        $newSubdomain = $request->input('new_subdomain');
+        try {
+            $currentSubdomain = $request->input('current_subdomain');
+            $newSubdomain = $request->input('new_subdomain');
 
-        // Check if the new subdomain is already taken
-        $exists = Domain::where('domain', 'like', $newSubdomain . '.%')
-            ->where('domain', 'not like', $currentSubdomain . '.%')
-            ->exists();
+            // Check if the new subdomain is already taken
+            $exists = Domain::where('domain', 'like', $newSubdomain . '.%')
+                ->where('domain', 'not like', $currentSubdomain . '.%')
+                ->exists();
 
-        if ($exists) {
-            return response()->json([
-                'success' => false,
-                'message' => 'This subdomain is already taken.'
-            ], 422);
-        }
-
-        // Find the current domain
-        $domain = Domain::where('domain', 'like', $currentSubdomain . '.%')->first();
-
-        if (!$domain) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Current domain not found.'
-            ], 404);
-        }
-
-        // Update the domain name
-        $oldDomain = $domain->domain;
-        $baseDomain = substr($oldDomain, strpos($oldDomain, '.') + 1);
-        $domain->domain = $newSubdomain . '.' . $baseDomain;
-        $domain->save();
-
-        // If tenant ID is based on subdomain, update it
-        $tenant = Tenant::find($domain->tenant_id);
-        if ($tenant && $tenant->id === $currentSubdomain) {
-            // Rename the database
-            $oldDatabaseName = config('tenancy.database.prefix') . $tenant->id . config('tenancy.database.suffix');
-            $newDatabaseName = config('tenancy.database.prefix') . $newSubdomain . config('tenancy.database.suffix');
-
-            try {
-                // Create a new database with the new name
-                DB::statement("CREATE DATABASE IF NOT EXISTS `{$newDatabaseName}`");
-
-                // Copy data from old database to new one
-                // This is a simplified approach - in a real application, you might want to use a more robust method
-                $tables = DB::select("SHOW TABLES FROM `{$oldDatabaseName}`");
-                $tableKey = 'Tables_in_' . $oldDatabaseName;
-
-                foreach ($tables as $table) {
-                    $tableName = $table->$tableKey;
-                    DB::statement("CREATE TABLE `{$newDatabaseName}`.`{$tableName}` LIKE `{$oldDatabaseName}`.`{$tableName}`");
-                    DB::statement("INSERT INTO `{$newDatabaseName}`.`{$tableName}` SELECT * FROM `{$oldDatabaseName}`.`{$tableName}`");
-                }
-
-                // Update tenant ID
-                $tenant->id = $newSubdomain;
-                $tenant->save();
-
-                // Drop the old database
-                DB::statement("DROP DATABASE `{$oldDatabaseName}`");
-            } catch (\Exception $e) {
-                // If something goes wrong, revert domain change
-                $domain->domain = $oldDomain;
-                $domain->save();
-
+            if ($exists) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Failed to update database: ' . $e->getMessage()
-                ], 500);
+                    'message' => 'This subdomain is already taken.'
+                ], 422);
             }
-        }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Subdomain updated successfully.',
-            'new_domain' => $domain->domain
-        ]);
+            // Find the current domain
+            $domain = Domain::where('domain', 'like', $currentSubdomain . '.%')->first();
+
+            if (!$domain) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Current domain not found.'
+                ], 404);
+            }
+
+            // Update the domain name
+            $oldDomain = $domain->domain;
+            $baseDomain = substr($oldDomain, strpos($oldDomain, '.') + 1);
+            $domain->domain = $newSubdomain . '.' . $baseDomain;
+            $domain->save();
+
+            // If tenant ID is based on subdomain, update it
+            $tenant = Tenant::find($domain->tenant_id);
+            if ($tenant && $tenant->id === $currentSubdomain) {
+                // Rename the database
+                $oldDatabaseName = config('tenancy.database.prefix') . $tenant->id . config('tenancy.database.suffix');
+                $newDatabaseName = config('tenancy.database.prefix') . $newSubdomain . config('tenancy.database.suffix');
+
+                try {
+                    // Create a new database with the new name
+                    DB::statement("CREATE DATABASE IF NOT EXISTS `{$newDatabaseName}`");
+
+                    // Copy data from old database to new one
+                    // This is a simplified approach - in a real application, you might want to use a more robust method
+                    $tables = DB::select("SHOW TABLES FROM `{$oldDatabaseName}`");
+                    $tableKey = 'Tables_in_' . $oldDatabaseName;
+
+                    foreach ($tables as $table) {
+                        $tableName = $table->$tableKey;
+                        DB::statement("CREATE TABLE `{$newDatabaseName}`.`{$tableName}` LIKE `{$oldDatabaseName}`.`{$tableName}`");
+                        DB::statement("INSERT INTO `{$newDatabaseName}`.`{$tableName}` SELECT * FROM `{$oldDatabaseName}`.`{$tableName}`");
+                    }
+
+                    // Update tenant ID
+                    $tenant->id = $newSubdomain;
+                    $tenant->save();
+
+                    // Drop the old database
+                    DB::statement("DROP DATABASE `{$oldDatabaseName}`");
+                } catch (\Exception $e) {
+                    // If something goes wrong, revert domain change
+                    $domain->domain = $oldDomain;
+                    $domain->save();
+
+                    \Log::error('Subdomain update database error: ' . $e->getMessage());
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Failed to update database: ' . $e->getMessage()
+                    ], 500);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Subdomain updated successfully.',
+                'new_domain' => $domain->domain
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Subdomain update error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while updating the subdomain: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -139,27 +158,38 @@ class SubdomainController extends Controller
      */
     public function current(Request $request)
     {
-        // Get the current domain from the authenticated user
-        $user = $request->user();
-        
-        if (!$user) {
-            // If not authenticated, get from the request host
-            $domain = $request->getHost();
-        } else {
-            // Get the domain associated with the user's tenant
-            $domain = Domain::where('tenant_id', $user->tenant_id)->first();
+        try {
+            // Get the current domain from the authenticated user
+            $user = $request->user();
             
-            if (!$domain) {
-                // Fallback to request host if no domain found
+            if (!$user) {
+                // If not authenticated, get from the request host
                 $domain = $request->getHost();
             } else {
-                $domain = $domain->domain;
+                // Get the domain associated with the user's tenant
+                $domain = Domain::where('tenant_id', $user->tenant_id)->first();
+                
+                if (!$domain) {
+                    // Fallback to request host if no domain found
+                    $domain = $request->getHost();
+                } else {
+                    $domain = $domain->domain;
+                }
             }
+            
+            return response()->json([
+                'success' => true,
+                'domain' => $domain
+            ]);
+        } catch (\Exception $e) {
+            // Log the error for debugging
+            \Log::error('Current domain check error: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'domain' => $request->getHost(),
+                'message' => 'An error occurred while retrieving the current domain.'
+            ]);
         }
-        
-        return response()->json([
-            'success' => true,
-            'domain' => $domain
-        ]);
     }
 }
