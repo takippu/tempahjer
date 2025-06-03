@@ -13,16 +13,6 @@ Route::get('dashboard', function () {
     return Inertia::render('Dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
-Route::middleware([
-    'web',
-    InitializeTenancyByDomain::class,
-    PreventAccessFromCentralDomains::class,
-])->group(function () {
-    Route::get('/', function () {
-        dd(\App\Models\User::all());
-        return 'This is your multi-tenant application. The id of the current tenant is ' . tenant('id');
-    });
-});
 
 require __DIR__.'/settings.php';
 require __DIR__.'/auth.php';
